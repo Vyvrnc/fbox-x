@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -73,6 +74,7 @@ import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.style.TextAlign
@@ -95,6 +97,8 @@ import io.element.android.libraries.htmlrenderer.api.LocalMentionDisplayNames
 import io.element.android.libraries.htmlrenderer.api.MentionNodeContent
 import io.element.android.libraries.htmlrenderer.api.ParagraphNode
 import io.element.android.libraries.htmlrenderer.api.QuoteNode
+import io.element.android.libraries.htmlrenderer.api.TableCellAlignment
+import io.element.android.libraries.htmlrenderer.api.TableNode
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.ui.common.layout.ContentAvoidingLayout
 import io.element.android.libraries.ui.common.layout.ContentAvoidingLayoutData
@@ -175,6 +179,7 @@ internal fun BlockNode.lastBlockNode(): BlockNode? = when (this) {
     is QuoteNode -> this
     is CodeBlockNode -> this
     is HeaderNode -> this
+    is TableNode -> this
 }
 
 @Composable
@@ -210,6 +215,95 @@ private fun BlockNodeView(
         is CodeBlockNode -> CodeBlockView(node = node, modifier = modifier)
         is QuoteNode -> QuoteView(node = node, context = context, modifier = modifier)
         is ListNode -> ListView(node = node, context = context, modifier = modifier)
+        is TableNode -> TableView(node = node, context = context, modifier = modifier)
+    }
+}
+
+/**
+ * fbox: renders a [TableNode] as a bordered grid. Each column is as wide as its widest cell
+ * (capped at [TableColumnMaxWidth], longer text wraps), and a table wider than the bubble scrolls
+ * horizontally instead of squeezing the columns.
+ */
+@Composable
+private fun TableView(
+    node: TableNode,
+    context: RenderContext,
+    modifier: Modifier = Modifier,
+) {
+    val columnCount = node.columnCount
+    val bodyStyle = LocalTextStyle.current
+    val headerStyle = bodyStyle.copy(fontWeight = FontWeight.Bold)
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val columnWidths: List<Dp> = remember(node, bodyStyle, density) {
+        List(columnCount) { column ->
+            val widestPx = node.rows.maxOf { row ->
+                val cell = row.cells.getOrNull(column) ?: return@maxOf 0
+                textMeasurer.measure(
+                    text = cell.text.text,
+                    style = if (cell.header) headerStyle else bodyStyle,
+                    softWrap = false,
+                ).size.width
+            }
+            val textWidth = with(density) { widestPx.toDp() } + 1.dp
+            textWidth.coerceIn(TableColumnMinWidth, TableColumnMaxWidth) + TableCellPaddingHorizontal * 2
+        }
+    }
+    val borderColor = ElementTheme.colors.borderInteractiveSecondary
+    val headerBackground = ElementTheme.colors.bgSubtleSecondary
+    val shape = RoundedCornerShape(8.dp)
+    Box(modifier = modifier.horizontalScroll(rememberScrollState())) {
+        Column(
+            modifier = Modifier
+                .clip(shape)
+                .border(width = 1.dp, color = borderColor, shape = shape),
+        ) {
+            node.rows.forEachIndexed { rowIndex, row ->
+                val isHeaderRow = row.cells.all { it.header }
+                Row(
+                    modifier = Modifier
+                        .height(IntrinsicSize.Min)
+                        .then(if (isHeaderRow) Modifier.background(headerBackground) else Modifier),
+                ) {
+                    repeat(columnCount) { column ->
+                        val cell = row.cells.getOrNull(column)
+                        Box(
+                            modifier = Modifier
+                                .width(columnWidths[column])
+                                .fillMaxHeight()
+                                .drawBehind {
+                                    val stroke = 1.dp.toPx()
+                                    if (rowIndex > 0) {
+                                        drawLine(borderColor, Offset(0f, stroke / 2), Offset(size.width, stroke / 2), stroke)
+                                    }
+                                    if (column < columnCount - 1) {
+                                        val x = size.width - stroke / 2
+                                        drawLine(borderColor, Offset(x, 0f), Offset(x, size.height), stroke)
+                                    }
+                                }
+                                .padding(horizontal = TableCellPaddingHorizontal, vertical = TableCellPaddingVertical),
+                        ) {
+                            if (cell != null) {
+                                val style = if (cell.header) headerStyle else bodyStyle
+                                TextBlock(
+                                    text = cell.text,
+                                    inlineContent = cell.inlineContent,
+                                    textStyle = style.copy(
+                                        textAlign = when (cell.alignment) {
+                                            TableCellAlignment.Start -> TextAlign.Start
+                                            TableCellAlignment.Center -> TextAlign.Center
+                                            TableCellAlignment.End -> TextAlign.End
+                                        }
+                                    ),
+                                    context = context,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -630,6 +724,10 @@ private fun TextLayoutResult.urlAt(offset: Offset, text: AnnotatedString): Pair<
 private val BlockSpacing: Dp = 8.dp
 private val ListItemSpacing: Dp = 4.dp
 private val ListMarkerWidth: Dp = 24.dp
+private val TableColumnMinWidth: Dp = 24.dp
+private val TableColumnMaxWidth: Dp = 240.dp
+private val TableCellPaddingHorizontal: Dp = 8.dp
+private val TableCellPaddingVertical: Dp = 4.dp
 private val PillPaddingHorizontal: Dp = 6.dp
 private val PillPaddingVertical: Dp = 0.dp
 

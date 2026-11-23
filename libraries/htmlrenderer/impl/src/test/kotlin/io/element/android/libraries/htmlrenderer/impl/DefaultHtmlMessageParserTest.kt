@@ -19,6 +19,8 @@ import io.element.android.libraries.htmlrenderer.api.ListNode
 import io.element.android.libraries.htmlrenderer.api.MentionNodeContent
 import io.element.android.libraries.htmlrenderer.api.ParagraphNode
 import io.element.android.libraries.htmlrenderer.api.QuoteNode
+import io.element.android.libraries.htmlrenderer.api.TableCellAlignment
+import io.element.android.libraries.htmlrenderer.api.TableNode
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomAlias
 import io.element.android.libraries.matrix.api.core.RoomId
@@ -291,6 +293,48 @@ class DefaultHtmlMessageParserTest : RobolectricTest() {
             permalinkForRoomAliasLambda = { Result.success("https://matrix.to/#/${it.value}") },
         ),
     ) = DefaultHtmlMessageParser(permalinkParser, permalinkBuilder)
+
+    @Test
+    fun `table becomes a TableNode with header row, cells and alignment`() {
+        val document = parse(
+            """
+            <p>Před</p><table><thead><tr><th>Agent</th><th align="right">Počet</th></tr></thead>
+            <tbody><tr><td><strong>fbxops</strong></td><td style="text-align: right;">12</td></tr>
+            <tr><td>doktor</td></tr></tbody></table><p>Po</p>
+            """.trimIndent()
+        )
+        assertThat(document.children).hasSize(3)
+        val table = document.children[1] as TableNode
+        assertThat(table.rows).hasSize(3)
+        assertThat(table.columnCount).isEqualTo(2)
+
+        val header = table.rows[0].cells
+        assertThat(header.map { it.header }).containsExactly(true, true)
+        assertThat(header.map { it.text.text }).containsExactly("Agent", "Počet")
+        assertThat(header[1].alignment).isEqualTo(TableCellAlignment.End)
+
+        val firstRow = table.rows[1].cells
+        assertThat(firstRow[0].header).isFalse()
+        assertThat(firstRow[0].text.text).isEqualTo("fbxops")
+        assertThat(firstRow[0].text.spanStyles.single().item.fontWeight).isEqualTo(FontWeight.Bold)
+        assertThat(firstRow[1].alignment).isEqualTo(TableCellAlignment.End)
+
+        // A short row keeps its cells; the renderer pads it.
+        assertThat(table.rows[2].cells.map { it.text.text }).containsExactly("doktor")
+    }
+
+    @Test
+    fun `table cell with block content keeps one line per block`() {
+        val document = parse("<table><tr><td><p>první</p><p>druhý</p></td><td></td></tr></table>")
+        val table = document.children.single() as TableNode
+        assertThat(table.rows.single().cells.map { it.text.text }).containsExactly("první\ndruhý", "")
+    }
+
+    @Test
+    fun `table without cells is dropped`() {
+        val document = parse("<table><tr></tr></table>")
+        assertThat(document.children).isEmpty()
+    }
 
     private fun parse(
         html: String,

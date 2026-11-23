@@ -105,3 +105,38 @@ data class ListNode(
 data class ListItemNode(
     val children: ImmutableList<BlockNode>,
 ) : MessageNode
+
+/**
+ * A table (`<table>`), flattened to rows of cells. `<thead>`, `<tbody>` and `<tfoot>` are not
+ * kept: whether a cell belongs to the header is carried by [TableCellNode.header].
+ *
+ * Rows can have a different number of cells; the renderer pads the short ones.
+ */
+@Immutable
+data class TableNode(
+    val rows: ImmutableList<TableRowNode>,
+) : BlockNode {
+    /** The number of columns, i.e. the cell count of the widest row. */
+    val columnCount: Int get() = rows.maxOfOrNull { it.cells.size } ?: 0
+}
+
+/** A table row (`<tr>`). */
+@Immutable
+data class TableRowNode(
+    val cells: ImmutableList<TableCellNode>,
+) : MessageNode
+
+/** Horizontal alignment of a table cell's content, from `align` or `style="text-align: …"`. */
+enum class TableCellAlignment { Start, Center, End }
+
+/**
+ * A table cell (`<td>` or `<th>`). Its content is flattened to inline text like a [ParagraphNode]:
+ * block content inside a cell (paragraphs, lists) is kept as text, not as nested blocks.
+ */
+@Immutable
+data class TableCellNode(
+    val header: Boolean,
+    val alignment: TableCellAlignment,
+    val text: AnnotatedString,
+    val inlineContent: ImmutableMap<String, MentionNodeContent> = persistentMapOf(),
+) : MessageNode

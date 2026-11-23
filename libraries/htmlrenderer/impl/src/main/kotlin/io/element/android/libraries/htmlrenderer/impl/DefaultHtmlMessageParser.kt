@@ -27,6 +27,10 @@ import io.element.android.libraries.htmlrenderer.api.ListNode
 import io.element.android.libraries.htmlrenderer.api.MentionNodeContent
 import io.element.android.libraries.htmlrenderer.api.ParagraphNode
 import io.element.android.libraries.htmlrenderer.api.QuoteNode
+import io.element.android.libraries.htmlrenderer.api.TableCellAlignment
+import io.element.android.libraries.htmlrenderer.api.TableCellNode
+import io.element.android.libraries.htmlrenderer.api.TableNode
+import io.element.android.libraries.htmlrenderer.api.TableRowNode
 import io.element.android.libraries.htmlrenderer.api.spans.InlineCodeSpanStyle
 import io.element.android.libraries.matrix.api.permalink.PermalinkBuilder
 import io.element.android.libraries.matrix.api.permalink.PermalinkData
@@ -34,6 +38,7 @@ import io.element.android.libraries.matrix.api.permalink.PermalinkParser
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toImmutableList
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -98,7 +103,46 @@ class DefaultHtmlMessageParser(
         TAG_UL -> buildList(element, ordered = false)
         TAG_OL -> buildList(element, ordered = true)
         in HEADER_TAGS -> buildHeader(element, level = tag.removePrefix("h").toInt())
+        TAG_TABLE -> buildTable(element)
         else -> null
+    }
+
+    /**
+     * Builds a [TableNode] from the rows of [element], whether they sit directly in the `<table>` or in
+     * its `<thead>` / `<tbody>` / `<tfoot>`. Rows of a table nested in a cell are not collected here:
+     * that table is flattened into the cell's text. Returns `null` if the table has no cell.
+     */
+    private fun buildTable(element: Element): TableNode? {
+        val rows = element.children()
+            .flatMap { child -> if (child.tagName() in TABLE_SECTION_TAGS) child.children() else listOf(child) }
+            .filter { it.tagName() == TAG_TR }
+            .map { row ->
+                TableRowNode(
+                    cells = row.children()
+                        .filter { it.tagName() == TAG_TD || it.tagName() == TAG_TH }
+                        .map(::buildTableCell)
+                        .toImmutableList()
+                )
+            }
+            .filter { it.cells.isNotEmpty() }
+            .toImmutableList()
+        return if (rows.isEmpty()) null else TableNode(rows = rows)
+    }
+
+    private fun buildTableCell(cell: Element): TableCellNode {
+        val builder = InlineContentBuilder()
+        // Block content inside a cell (`<p>`, `<li>`, ...) is kept as lines of text.
+        cell.childNodes().forEach { child ->
+            if (child is Element && child.tagName() in CELL_LINE_TAGS) builder.appendLineBreakIfNeeded()
+            builder.append(child)
+        }
+        val content = builder.build()
+        return TableCellNode(
+            header = cell.tagName() == TAG_TH,
+            alignment = cell.cellAlignment(),
+            text = content?.text?.trimTrailingLineBreaks() ?: AnnotatedString(""),
+            inlineContent = content?.inlineContent ?: persistentMapOf(),
+        )
     }
 
     private fun buildList(element: Element, ordered: Boolean): ListNode {
@@ -159,6 +203,11 @@ class DefaultHtmlMessageParser(
                 // Unknown inline wrapper: keep its text so nothing is dropped.
                 else -> appendChildren(element)
             }
+        }
+
+        /** Starts a new line unless the content is empty or already ends with one. */
+        fun appendLineBreakIfNeeded() {
+            if (builder.length > 0 && !builder.toAnnotatedString().text.endsWith('\n')) builder.append('\n')
         }
 
         private fun appendChildren(element: Element) {
@@ -247,7 +296,29 @@ private fun Element.isBlockLevel(): Boolean = tagName() in BLOCK_TAGS
 
 private val HEADER_TAGS = setOf("h1", "h2", "h3", "h4", "h5", "h6")
 
-private val BLOCK_TAGS = setOf(TAG_P, TAG_PRE, TAG_BLOCKQUOTE, TAG_UL, TAG_OL) + HEADER_TAGS
+private val BLOCK_TAGS = setOf(TAG_P, TAG_PRE, TAG_BLOCKQUOTE, TAG_UL, TAG_OL, TAG_TABLE) + HEADER_TAGS
+
+private val TABLE_SECTION_TAGS = setOf("thead", "tbody", "tfoot")
+
+/** Tags inside a table cell that start a new line of its text. */
+private val CELL_LINE_TAGS = setOf(TAG_P, TAG_LI, TAG_PRE, TAG_BLOCKQUOTE, TAG_UL, TAG_OL) + HEADER_TAGS
+
+private val TEXT_ALIGN_REGEX = Regex("""text-align\s*:\s*([a-z]+)""", RegexOption.IGNORE_CASE)
+
+/** Reads the cell alignment from `align="…"` or `style="text-align: …"`, the two forms Markdown renderers emit. */
+private fun Element.cellAlignment(): TableCellAlignment {
+    val value = attr("align").ifEmpty { TEXT_ALIGN_REGEX.find(attr("style"))?.groupValues?.get(1).orEmpty() }
+    return when (value.lowercase()) {
+        "center" -> TableCellAlignment.Center
+        "right", "end" -> TableCellAlignment.End
+        else -> TableCellAlignment.Start
+    }
+}
+
+private fun AnnotatedString.trimTrailingLineBreaks(): AnnotatedString {
+    val end = text.trimEnd('\n').length
+    return if (end == text.length) this else subSequence(0, end)
+}
 
 private const val TAG_P = "p"
 private const val TAG_PRE = "pre"
@@ -255,6 +326,10 @@ private const val TAG_BLOCKQUOTE = "blockquote"
 private const val TAG_UL = "ul"
 private const val TAG_OL = "ol"
 private const val TAG_LI = "li"
+private const val TAG_TABLE = "table"
+private const val TAG_TR = "tr"
+private const val TAG_TD = "td"
+private const val TAG_TH = "th"
 private const val TAG_BR = "br"
 private const val TAG_B = "b"
 private const val TAG_STRONG = "strong"

@@ -93,11 +93,22 @@ private object HtmlToDomCleaner {
             "h4",
             "h5",
             "h6",
+            // fbox: tables (Markdown tables from the agents), rendered by TableView
+            "table",
+            "thead",
+            "tbody",
+            "tfoot",
+            "tr",
+            "th",
+            "td",
             // Add custom `mx-reply` tag, even if it's just to remove its contents from the plain text version of the message
             "mx-reply"
         )
         .addAttributes("a", "href", "data-mention-type", "contenteditable")
         .addAttributes("ol", "start")
+        // fbox: only the alignment is read from these, the style itself is never applied
+        .addAttributes("th", "align", "style")
+        .addAttributes("td", "align", "style")
 }
 
 /** Custom Html to DOM parser, based on the one included in the rich text editor library. */
