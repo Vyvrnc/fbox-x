@@ -21,6 +21,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** Otisk SHA-256 v malých hex znacích, stejný jako ten, který počítá build.gradle.kts. */
+internal fun sha256Hex(text: String): String =
+    java.security.MessageDigest.getInstance("SHA-256")
+        .digest(text.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+
 /** Stav odpovědi na jeden dotaz (podle ID události se zprávou). */
 sealed interface FboxOdpovedStav {
     data object Zadna : FboxOdpovedStav
@@ -44,7 +50,8 @@ class FboxDotazController(
     private val activeRoomsHolder: ActiveRoomsHolder,
     @AppCoroutineScope private val appCoroutineScope: CoroutineScope,
 ) {
-    private val odesilatele: Set<String> = BuildConfig.DOTAZ_ODESILATELE
+    // Otisky SHA-256 povolených odesílatelů (viz build.gradle.kts), ne samotná ID.
+    private val otiskyOdesilatelu: Set<String> = BuildConfig.DOTAZ_ODESILATELE_SHA256
         .split(',')
         .map { it.trim() }
         .filter { it.isNotEmpty() }
@@ -55,7 +62,7 @@ class FboxDotazController(
 
     /** Vrátí dotaz, jen když zprávu poslal povolený odesílatel a text má tvar dotazu. */
     fun rozpoznej(senderId: String, body: String): FboxDotaz? {
-        if (senderId !in odesilatele) return null
+        if (otiskyOdesilatelu.isEmpty() || sha256Hex(senderId) !in otiskyOdesilatelu) return null
         return FboxDotazParser.parse(body)
     }
 

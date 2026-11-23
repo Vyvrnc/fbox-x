@@ -1,5 +1,6 @@
 import extension.setupDependencyInjection
 import extension.testCommonDependencies
+import java.security.MessageDigest
 
 /*
  * Fbox: doplňky forku nad Element X. Celý modul je náš kód.
@@ -12,9 +13,18 @@ plugins {
 }
 
 // Odesílatelé, jejichž zprávy ve tvaru dotazu dostanou tlačítka (Matrix ID oddělená čárkou).
-// Nastavení při sestavení (gradle.properties mimo repo, nebo proměnná CI): ./gradlew ... -Pfbox.dotaz.odesilatele=@git:example.org,@jiny:example.org
+// Nastavení při sestavení (gradle.properties mimo repo, nebo tajemství CI): ./gradlew ... -Pfbox.dotaz.odesilatele=@git:example.org,@jiny:example.org
+// Do APK jdou jen otisky SHA-256, ne samotná ID: APK je veřejně ke stažení a ID tam čitelně nemá být.
 val dotazOdesilatele: String = providers.gradleProperty("fbox.dotaz.odesilatele").orNull
     ?: "" // bez nastavení tlačítka nikomu nenabízíme
+val dotazOtisky: String = dotazOdesilatele.split(',')
+    .map { it.trim() }
+    .filter { it.isNotEmpty() }
+    .joinToString(",") { id ->
+        MessageDigest.getInstance("SHA-256")
+            .digest(id.toByteArray(Charsets.UTF_8))
+            .joinToString("") { bajt -> "%02x".format(bajt) }
+    }
 
 android {
     namespace = "cz.fbox.x.features.fbox.impl"
@@ -24,7 +34,7 @@ android {
     }
 
     defaultConfig {
-        buildConfigField("String", "DOTAZ_ODESILATELE", "\"$dotazOdesilatele\"")
+        buildConfigField("String", "DOTAZ_ODESILATELE_SHA256", "\"$dotazOtisky\"")
     }
 }
 

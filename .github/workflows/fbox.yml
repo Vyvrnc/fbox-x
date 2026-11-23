@@ -1,0 +1,138 @@
+# fbox-x: týdenní sestavení forku nad aktuálním upstreamem a vydání APK.
+#
+# Postup: vezme větev fbox, přenese ji na nejnovější element-hq/element-x-android develop,
+# spustí naše testy, sestaví podepsané APK (build type nightly = podpis z tajemství, bez úprav
+# souborů upstreamu) a vydá ho jako GitHub release. Větev fbox CI NEPŘEPISUJE: rebase je jen
+# pro sestavení, přenést ji natrvalo je ruční krok (git rebase upstream/develop + push).
+# Když rebase narazí na konflikt, běh selže a založí issue.
+#
+# Tajemství: FBOX_KEYSTORE_BASE64, ELEMENT_ANDROID_NIGHTLY_KEYID, ELEMENT_ANDROID_NIGHTLY_KEYPASSWORD,
+# ELEMENT_ANDROID_NIGHTLY_STOREPASSWORD, FBOX_DOTAZ_ODESILATELE.
+
+name: fbox – sestavení a vydání
+
+on:
+  schedule:
+    # pondělí 3:17 UTC
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      vydat:
+        description: Vydat release i bez nového upstreamu
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: fbox-sestaveni
+  cancel-in-progress: false
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx8g -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8 -XX:+UseG1GC -Dkotlin.daemon.jvm.options=-Xmx4g
+  GRADLE_ARGS: --stacktrace --no-daemon --no-configuration-cache
+  # Obrázky ze screenshot testů v LFS nepotřebujeme.
+  GIT_LFS_SKIP_SMUDGE: "1"
+
+jobs:
+  sestaveni:
+    if: github.repository_owner != 'element-hq'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: fbox
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Přenést fbox na nejnovější upstream
+        id: upstream
+        run: |
+          git config user.name "fbox-x CI"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add element https://github.com/element-hq/element-x-android.git
+          git fetch --no-tags element develop
+          fbox_sha=$(git rev-parse HEAD)
+          upstream_sha=$(git rev-parse element/develop)
+          echo "fbox_sha=$fbox_sha" >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=$upstream_sha" >> "$GITHUB_OUTPUT"
+          git rebase element/develop
+          echo "Sestavuje se fbox ${fbox_sha:0:10} na upstreamu ${upstream_sha:0:10}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Je co vydávat?
+        id: rozhodnuti
+        env:
+          UDALOST: ${{ github.event_name }}
+          VYDAT: ${{ inputs.vydat }}
+          UPSTREAM_SHA: ${{ steps.upstream.outputs.upstream_sha }}
+          FBOX_SHA: ${{ steps.upstream.outputs.fbox_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          posledni=$(gh release view --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null || true)
+          if [ "$UDALOST" = "workflow_dispatch" ] && [ "$VYDAT" = "true" ]; then
+            echo "vydat=true" >> "$GITHUB_OUTPUT"
+          elif printf '%s' "$posledni" | grep -q "$UPSTREAM_SHA" && printf '%s' "$posledni" | grep -q "$FBOX_SHA"; then
+            echo "Upstream ani fbox se od posledního vydání nezměnily, nic se nevydává." >> "$GITHUB_STEP_SUMMARY"
+            echo "vydat=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "vydat=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Připravit sestavovací prostředí
+        if: steps.rozhodnuti.outputs.vydat == 'true'
+        uses: ./.github/actions/setup-build
+        with:
+          free-disk-space: 'true'
+          gradle-cache-read-only: 'false'
+
+      - name: Testy fbox
+        if: steps.rozhodnuti.outputs.vydat == 'true'
+        run: ./gradlew :features:fbox:impl:testDebugUnitTest :libraries:htmlrenderer:impl:testDebugUnitTest $GRADLE_ARGS
+
+      - name: Sestavit podepsané APK
+        if: steps.rozhodnuti.outputs.vydat == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.FBOX_KEYSTORE_BASE64 }}
+          ELEMENT_ANDROID_NIGHTLY_KEYID: ${{ secrets.ELEMENT_ANDROID_NIGHTLY_KEYID }}
+          ELEMENT_ANDROID_NIGHTLY_KEYPASSWORD: ${{ secrets.ELEMENT_ANDROID_NIGHTLY_KEYPASSWORD }}
+          ELEMENT_ANDROID_NIGHTLY_STOREPASSWORD: ${{ secrets.ELEMENT_ANDROID_NIGHTLY_STOREPASSWORD }}
+          ODESILATELE: ${{ secrets.FBOX_DOTAZ_ODESILATELE }}
+        run: |
+          export ELEMENT_ANDROID_NIGHTLY_STOREFILE="$RUNNER_TEMP/fbox-x-release.p12"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$ELEMENT_ANDROID_NIGHTLY_STOREFILE"
+          ./gradlew :app:assembleGplayNightly "-Pfbox.dotaz.odesilatele=$ODESILATELE" $GRADLE_ARGS
+          rm -f "$ELEMENT_ANDROID_NIGHTLY_STOREFILE"
+
+      - name: Vydat release
+        if: steps.rozhodnuti.outputs.vydat == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_SHA: ${{ steps.upstream.outputs.upstream_sha }}
+          FBOX_SHA: ${{ steps.upstream.outputs.fbox_sha }}
+        run: |
+          verze=$(grep -oE 'versionYear = [0-9]+|versionMonth = [0-9]+|versionReleaseNumber = [0-9]+' plugins/src/main/kotlin/Versions.kt | grep -oE '[0-9]+' | paste -sd.)
+          tag="v${verze}-fbox.${GITHUB_RUN_NUMBER}"
+          apk="fbox-x-${verze}-fbox.${GITHUB_RUN_NUMBER}-arm64-v8a.apk"
+          cp app/build/outputs/apk/gplay/nightly/app-gplay-arm64-v8a-nightly.apk "$apk"
+          {
+            echo "Sestaveno z větve fbox \`$FBOX_SHA\` přenesené na element-hq/element-x-android develop \`$UPSTREAM_SHA\`."
+            echo
+            echo "SHA-256 APK: \`$(sha256sum "$apk" | cut -d' ' -f1)\`"
+          } > poznamky.md
+          gh release create "$tag" "$apk" --repo "$GITHUB_REPOSITORY" --target "$FBOX_SHA" \
+            --title "$tag" --notes-file poznamky.md
+          echo "Vydáno: $tag" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Při chybě založit issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Sestavení fbox selhalo ($(date -u +%Y-%m-%d))" \
+            --body "Běh: $RUN_URL. Pokud selhal krok 'Přenést fbox na nejnovější upstream', jde o konflikt s upstreamem: přenes větev fbox ručně (git rebase upstream/develop) a pushni."
