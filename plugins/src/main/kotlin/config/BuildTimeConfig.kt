@@ -9,9 +9,9 @@
 package config
 
 object BuildTimeConfig {
-    const val APPLICATION_ID = "io.element.android.x"
-    const val APPLICATION_NAME = "Element X"
-    val METADATA_HOST_REVERSED: String? = null
+    const val APPLICATION_ID = "cz.fbox.x" // fbox: vlastní identita, instalace vedle Element X
+    const val APPLICATION_NAME = "Fbox" // fbox
+    val METADATA_HOST_REVERSED: String? = "cz.fbox.x" // fbox: vlastní schéma návratu z OAuth
     val OAUTH_CLIENT_URL_PATH: String? = "apps/android"
     val URL_WEBSITE: String? = null
     val URL_LOGO: String? = null
@@ -29,11 +29,11 @@ object BuildTimeConfig {
     val SERVICES_SENTRY_DSN_RUST: String? = null
     val BUG_REPORT_URL: String? = null
     val BUG_REPORT_APP_NAME: String? = null
-    const val PUSH_CONFIG_INCLUDE_FIREBASE: Boolean = true
+    const val PUSH_CONFIG_INCLUDE_FIREBASE: Boolean = false // fbox: Firebase projekt patří Elementu, používáme UnifiedPush
     const val PUSH_CONFIG_INCLUDE_UNIFIED_PUSH: Boolean = true
     val PUSHER_APP_ID_RELEASE: String? = null
     val PUSHER_APP_ID_DEBUG: String? = null
     val PUSHER_APP_ID_NIGHTLY: String? = null
-    const val ELEMENT_LINKS_ENABLED: Boolean = true
+    const val ELEMENT_LINKS_ENABLED: Boolean = false // fbox: nehlásit se k odkazům element.io
     const val ELEMENT_MOBILE_LINK_PATH: String = "/element/"
 }
