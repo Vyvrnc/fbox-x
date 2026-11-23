@@ -342,6 +342,15 @@ fun TimelineItemEventRow(
             )
         }
 
+        // fbox: doplněk pod zprávou (tlačítka dotazu dispečera). Jediný zásah fbox v tomto souboru, záměrně bez importů; viz features/fbox.
+        cz.fbox.x.features.fbox.impl.FboxTimelineAddon(
+            sessionId = timelineRoomInfo.currentUserId.value,
+            senderId = event.senderId.value,
+            eventId = event.eventId?.value,
+            body = (event.content as? io.element.android.features.messages.impl.timeline.model.event.TimelineItemTextBasedContent)?.body,
+            modifier = Modifier.padding(horizontal = 16.dp).offset(selectionContentOffset),
+        )
+
         if (displayThreadSummaries && timelineMode !is Timeline.Mode.Thread && event.threadInfo is TimelineItemThreadInfo.ThreadRoot) {
             ThreadSummaryView(
                 modifier = if (event.isMine) {

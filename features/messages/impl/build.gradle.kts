@@ -27,6 +27,7 @@ setupDependencyInjection()
 
 dependencies {
     api(projects.features.messages.api)
+    implementation(projects.features.fbox.impl) // fbox: doplněk pod zprávou, volá se z TimelineItemEventRow
     implementation(projects.appconfig)
     implementation(projects.features.call.api)
     implementation(projects.features.enterprise.api)
