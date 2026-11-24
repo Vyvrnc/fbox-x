@@ -342,7 +342,7 @@ fun TimelineItemEventRow(
             )
         }
 
-        // fbox: doplněk pod zprávou (tlačítka dotazu dispečera). Jediný zásah fbox v tomto souboru, záměrně bez importů; viz features/fbox.
+        // fbox: doplněk pod zprávou (tlačítka dotazu dispečera), záměrně bez importů; viz features/fbox. Druhý zásah fbox: šířka příchozí zprávy v TimelineItemEventRowContentLayout.
         cz.fbox.x.features.fbox.impl.FboxTimelineAddon(
             sessionId = timelineRoomInfo.currentUserId.value,
             senderId = event.senderId.value,
@@ -692,7 +692,15 @@ private fun TimelineItemEventRowContentLayout(
         fun measure(id: EventRowLayoutId) = measurables.firstOrNull { it.layoutId == id }?.measure(childConstraints)
 
         val senderPlaceable = measure(EventRowLayoutId.Sender)
-        val messagePlaceable = checkNotNull(measure(EventRowLayoutId.Message))
+        // fbox: příchozí zpráva smí do celé šířky řádku bez levého odsazení a pravého okraje 16 dp
+        // (MessageEventBubble ji u příchozích už nezužuje na 78 %). Vlastní zprávy beze změny.
+        val messageConstraints = if (isMine) {
+            childConstraints
+        } else {
+            val fboxStartMargin = if (isDm) 16.dp else 16.dp + BUBBLE_INCOMING_OFFSET
+            childConstraints.copy(maxWidth = (width - fboxStartMargin.roundToPx() - 16.dp.roundToPx()).coerceAtLeast(0))
+        }
+        val messagePlaceable = checkNotNull(measurables.firstOrNull { it.layoutId == EventRowLayoutId.Message }?.measure(messageConstraints))
         val pinIconPlaceable = measure(EventRowLayoutId.PinIcon)
         val reactionsPlaceable = measure(EventRowLayoutId.Reactions)
         val selectionIndicatorPlaceable = measure(EventRowLayoutId.SelectionIndicator)

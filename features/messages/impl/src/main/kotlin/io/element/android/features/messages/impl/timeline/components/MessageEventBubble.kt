@@ -139,7 +139,8 @@ fun MessageEventBubble(
                 .testTag(TestTags.messageBubble)
                 .widthIn(
                     min = MIN_BUBBLE_WIDTH,
-                    max = (constraints.maxWidth * MessageEventBubbleDefaults.BUBBLE_WIDTH_RATIO)
+                    // fbox: příchozí zprávy do plné šířky, kterou jim dá TimelineItemEventRow; 78 % jen u vlastních
+                    max = (constraints.maxWidth * (if (state.isMine) MessageEventBubbleDefaults.BUBBLE_WIDTH_RATIO else 1f))
                         .toInt()
                         .toDp()
                 )
